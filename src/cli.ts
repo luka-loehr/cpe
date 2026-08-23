@@ -8,11 +8,11 @@
  */
 
 import { login, call, type Session, type ApiError } from "./api.ts";
-import { saveSession, loadSession, SESSION_FILE } from "./session.ts";
-import { c, fail, step, ok, box, table } from "./ui.ts";
+import { saveSession, loadSession, clearSession, SESSION_FILE } from "./session.ts";
+import { c, fail, step, ok, box, table, formatBytes, PLAN_UNITS } from "./ui.ts";
 import { ALL_ENDPOINTS, ENDPOINT_COUNT, getEndpoint, endpointsByCategory, searchEndpoints, type EndpointInfo } from "./endpoints.ts";
 
-const VERSION = "1.1.0";
+const VERSION = "1.2.0";
 const argv = process.argv.slice(2);
 const cmd = argv.find(a => !a.startsWith("-")) ?? "";
 const positional = () => argv.filter(a => !a.startsWith("-")).slice(1);
@@ -26,6 +26,7 @@ function usage() {
   L("");
   L(c.bold("Setup"));
   L("  " + c.cyan("cpe login") + "                          authenticate (interactive prompt or $CPE_PASSWORD)");
+  L("  " + c.cyan("cpe logout") + "                         end the session and delete the local session file");
   L("");
   L(c.bold("Read (safe, no writes)"));
   L("  " + c.cyan("cpe status") + "                         router, network, signal, wifi summary");
@@ -59,7 +60,14 @@ function usage() {
   L("  --set                    with endpoints: show only write/action endpoints");
   L("  --category <cat>         with endpoints: filter by category");
   L("  --search <query>         with endpoints: search by name/description/category");
-  L("  --unread                 with sms: only unread messages");
+  L("  --unread                 with sms: only threads with unread messages");
+  L("");
+  L(c.bold("Environment"));
+  L("  CPE_PASSWORD             router password (avoids the interactive prompt)");
+  L("  CPE_USER                 login user (default: admin)");
+  L("  CPE_BASE                 API base URL (default: http://192.168.1.1/jrd/webapi)");
+  L("  CPE_TIMEOUT_MS           per-request timeout in ms (default: 15000)");
+  L("  NO_COLOR / FORCE_COLOR   disable / force ANSI colour");
   L("");
 }
 
@@ -119,6 +127,7 @@ async function safeCall(session: Session, method: string, params?: Record<string
   } catch (e) {
     if ((e as ApiError).expired) {
       fail("session expired - run " + c.cyan("cpe login") + " again");
+      step("the router auto-logs-out after a few minutes idle; see " + c.cyan("cpe call GetLogoutTimeSettings"));
     }
     throw e;
   }
@@ -127,6 +136,17 @@ async function safeCall(session: Session, method: string, params?: Record<string
 const NET_TYPES: Record<number, string> = {
   2: "GSM", 6: "GPRS", 7: "EDGE", 8: "WCDMA", 11: "HSDPA", 12: "HSUPA",
   13: "HSPA", 14: "HSPA+", 15: "LTE", 16: "5G NSA", 17: "5G SA",
+};
+
+/**
+ * ConnectType -> interface, transcribed from the router's own icon mapper:
+ *   [4,5,6,7]->lan  [8]->usb  [0]->5g_guest  [1]->5g
+ *   [2]->2g_guest   [3]->2g   [9]->6g_guest  [10]->6g
+ */
+const CONNECT_TYPES: Record<number, string> = {
+  0: "5G guest", 1: "5G", 2: "2.4G guest", 3: "2.4G",
+  4: "LAN", 5: "LAN", 6: "LAN", 7: "LAN",
+  8: "USB", 9: "6G guest", 10: "6G",
 };
 
 /** Clamp signal to [0,5] so .repeat() never throws RangeError. */
@@ -153,6 +173,18 @@ const main = async () => {
         if (isJson) print({ success: false, error: (e as Error).message });
         process.exit(1);
       }
+      return;
+    }
+
+    case "logout": {
+      // Best-effort server-side logout, then always drop the local file.
+      try {
+        const s = loadSession();
+        await call(s, "Logout", {}).catch(() => null);
+      } catch { /* no usable session — just clear the file */ }
+      const removed = clearSession();
+      ok(removed ? "session cleared" : "no session to clear");
+      if (isJson) print({ action: "logout", cleared: removed });
       return;
     }
 
@@ -204,8 +236,10 @@ const main = async () => {
         },
         data_usage: {
           billing_day: (usage as any)?.BillingDay ?? null,
-          monthly_plan_mb: (usage as any)?.MonthlyPlan ?? null,
-          used_mb: (usage as any)?.UsedData ?? null,
+          monthly_plan: (usage as any)?.MonthlyPlan ?? null,
+          monthly_plan_unit: PLAN_UNITS[(usage as any)?.Unit] ?? null,
+          used_bytes: (usage as any)?.UsedData ?? null,
+          used_human: typeof (usage as any)?.UsedData === "number" ? formatBytes((usage as any).UsedData) : null,
         },
       };
       if (isJson) { print(summary); return; }
@@ -218,8 +252,8 @@ const main = async () => {
         ["Signal", summary.network.signal_visual + " (" + signal + "/5)"],
         ["Status", summary.network.connected ? "connected" : "disconnected"],
         ["Roaming", summary.network.roaming ? "yes" : "no"],
-        ["Down", String(summary.network.download_speed ?? "?")],
-        ["Up", String(summary.network.upload_speed ?? "?")],
+        ["Down", typeof summary.network.download_speed === "number" ? formatBytes(summary.network.download_speed) + "/s" : "?"],
+        ["Up", typeof summary.network.upload_speed === "number" ? formatBytes(summary.network.upload_speed) + "/s" : "?"],
       ]));
       console.log(box("SIM", [
         ["State", summary.sim.state], ["PIN left", String(summary.sim.pin_remaining ?? "?")],
@@ -231,8 +265,10 @@ const main = async () => {
       ]));
       console.log(box("Data", [
         ["Billing day", String(summary.data_usage.billing_day ?? "?")],
-        ["Monthly plan", String(summary.data_usage.monthly_plan_mb ?? "?") + " MB"],
-        ["Used", String(summary.data_usage.used_mb ?? "?") + " MB"],
+        ["Monthly plan", summary.data_usage.monthly_plan
+          ? summary.data_usage.monthly_plan + " " + (summary.data_usage.monthly_plan_unit ?? "")
+          : "unlimited"],
+        ["Used", summary.data_usage.used_human ?? "?"],
       ]));
       return;
     }
@@ -257,17 +293,31 @@ const main = async () => {
       const list = (connected as any)?.ConnectedList ?? [];
       if (!list.length) { console.log("no devices connected"); return; }
       const rows = list.map((d: any) => [
-        d.MacAddress ?? d.MACAddress ?? "?",
-        d.IPAddress ?? d.IP ?? "?",
-        d.HostName ?? d.Hostname ?? d.Name ?? "?",
-        d.ConnectionType ?? d.Connection ?? "?",
+        d.MacAddress ?? "?",
+        d.IPAddress ?? "?",
+        d.DeviceName ?? "?",
+        CONNECT_TYPES[d.ConnectType] ?? String(d.ConnectType ?? "?"),
+        d.InternetRight === 0 ? "blocked" : "allowed",
       ]);
-      console.log(table(rows, ["MAC", "IP", "Hostname", "Type"]));
+      console.log(table(rows, ["MAC", "IP", "Name", "Link", "Internet"]));
       if ((blocked as any)?.BlockList?.length) console.log("\nBlocked: " + ((blocked as any).BlockList.length) + " devices");
       return;
     }
 
+    // Handles both the read (`cpe wifi`) and the toggle (`cpe wifi on|off`).
+    // These MUST live in one case: a second `case "wifi"` later in the same
+    // switch would be unreachable, since the first match wins.
     case "wifi": {
+      const sub = positional()[0];
+      if (sub === "on" || sub === "off") {
+        if (!has("--confirm")) { fail("toggling wifi requires --confirm"); process.exit(1); }
+        const s = needSession();
+        const result = await safeCall(s, "SetWlanState", { WlanState: sub === "on" ? 1 : 0 });
+        ok("wifi " + sub);
+        if (isJson) print({ action: "wifi", state: sub, result });
+        return;
+      }
+      if (sub) { fail('unknown wifi subcommand "' + sub + '" - use "on" or "off"'); process.exit(1); }
       const s = needSession();
       const [status, settings, state] = await Promise.all([
         safeCall(s, "GetApStatus").catch(() => null),
@@ -288,16 +338,26 @@ const main = async () => {
         print(result);
         return;
       }
-      // List SMS messages via contact list + storage state
+      // GetSMSContactList requires a Page param — without it the router
+      // answers 060201. The web UI calls it as {Page: 0}.
       const [contacts, storage] = await Promise.all([
-        safeCall(s, "GetSMSContactList").catch(() => null),
+        safeCall(s, "GetSMSContactList", { Page: 0 }).catch(() => null),
         safeCall(s, "GetSMSStorageState").catch(() => null),
       ]);
-      let messages = (contacts as any)?.SMSContactList ?? (contacts as any)?.ContactList ?? contacts;
-      if (has("--unread") && Array.isArray(messages)) {
-        messages = messages.filter((m: any) => m.Unread === 1 || m.SMSType === 1);
-      }
-      print({ messages, storage });
+      let messages: any[] = (contacts as any)?.SMSContactList ?? [];
+      // Unread is tracked per contact thread as UnreadCount, not a boolean.
+      if (has("--unread")) messages = messages.filter((m: any) => (m.UnreadCount ?? 0) > 0);
+      if (isJson) { print({ messages, storage }); return; }
+      if (!messages.length) { console.log(has("--unread") ? "no unread messages" : "no messages"); return; }
+      const smsRows = messages.map((m: any) => [
+        String(m.ContactId ?? "?"),
+        // PhoneNumber is an array; alphanumeric sender IDs contain control bytes.
+        String((m.PhoneNumber?.[0] ?? "?")).replace(/[\x00-\x1f]/g, " "),
+        String(m.UnreadCount ?? 0) + "/" + String(m.TSMSCount ?? 0),
+        String(m.SMSTime ?? "?"),
+        String(m.SMSContent ?? "").replace(/\s+/g, " ").slice(0, 48),
+      ]);
+      console.log(table(smsRows, ["ID", "From", "Unread/Total", "Last", "Preview"]));
       return;
     }
 
@@ -381,47 +441,35 @@ const main = async () => {
       return;
     }
 
-    case "wifi": {
-      // Handle "cpe wifi on" and "cpe wifi off" — both positional args after "wifi"
-      const sub = positional()[0];
-      if (sub === "on" || sub === "off") {
-        if (!has("--confirm")) { fail("toggling wifi requires --confirm"); process.exit(1); }
-        const s = needSession();
-        const result = await safeCall(s, "SetWlanState", { WlanState: sub === "on" ? 1 : 0 });
-        ok("wifi " + sub);
-        if (isJson) print({ action: "wifi", state: sub, result });
-        return;
-      }
-      // No subcommand: show wifi status (falls through to read handler below)
-      const s = needSession();
-      const [status, settings, state] = await Promise.all([
-        safeCall(s, "GetApStatus").catch(() => null),
-        safeCall(s, "GetWlanSettings").catch(() => null),
-        safeCall(s, "GetWlanState").catch(() => null),
-      ]);
-      print({ status, settings, state });
-      return;
-    }
-
-    case "block": {
-      if (!has("--confirm")) { fail("blocking a device requires --confirm"); process.exit(1); }
-      const mac = positional()[0];
-      if (!mac) { fail("usage: cpe block <mac>"); process.exit(1); }
-      const s = needSession();
-      const result = await safeCall(s, "SetConnectedDeviceBlock", { MacAddress: mac });
-      ok("blocked " + mac);
-      if (isJson) print({ action: "block", mac, result });
-      return;
-    }
-
+    case "block":
     case "unblock": {
-      if (!has("--confirm")) { fail("unblocking a device requires --confirm"); process.exit(1); }
+      const blocking = cmd === "block";
+      if (!has("--confirm")) { fail(cmd + "ing a device requires --confirm"); process.exit(1); }
       const mac = positional()[0];
-      if (!mac) { fail("usage: cpe unblock <mac>"); process.exit(1); }
+      if (!mac) { fail("usage: cpe " + cmd + " <mac> [--name <device-name>]"); process.exit(1); }
       const s = needSession();
-      const result = await safeCall(s, "SetDeviceUnblock", { MacAddress: mac });
-      ok("unblocked " + mac);
-      if (isJson) print({ action: "unblock", mac, result });
+
+      // SetConnectedDeviceBlock/SetDeviceUnblock both take {DeviceName, MacAddress};
+      // sending only the MAC silently no-ops. Resolve the name from the router.
+      let name = val("--name");
+      if (!name) {
+        const src = blocking
+          ? await safeCall(s, "GetConnectedDeviceList").catch(() => null)
+          : await safeCall(s, "GetBlockDeviceList").catch(() => null);
+        const list: any[] = (src as any)?.[blocking ? "ConnectedList" : "BlockList"] ?? [];
+        const hit = list.find((d: any) => String(d.MacAddress ?? "").toLowerCase() === mac.toLowerCase());
+        if (!hit) {
+          fail(mac + " is not in the " + (blocking ? "connected" : "blocked") + " device list");
+          step("pass --name <device-name> to act on it anyway");
+          process.exit(1);
+        }
+        name = hit.DeviceName;
+      }
+
+      const result = await safeCall(s, blocking ? "SetConnectedDeviceBlock" : "SetDeviceUnblock",
+        { DeviceName: name, MacAddress: mac });
+      ok((blocking ? "blocked " : "unblocked ") + mac + " (" + name + ")");
+      if (isJson) print({ action: cmd, mac, name, result });
       return;
     }
 
@@ -467,41 +515,54 @@ const main = async () => {
       const search = val("--search");
       const category = val("--category");
 
-      if (search) {
-        const results = searchEndpoints(search);
-        print(results);
-        return;
-      }
+      const matchesType = (e: EndpointInfo, t: string | null) =>
+        !t || (t === "get" ? e.type === "get" : e.type !== "get");
+      const matchesCat = (name: string) =>
+        !category || name.toLowerCase() === category.toLowerCase();
 
-      const cats = endpointsByCategory();
       let filterType: string | null = null;
       if (has("--get")) filterType = "get";
       if (has("--set")) filterType = "set";
 
+      if (search) {
+        const results = searchEndpoints(search).filter(e => matchesType(e, filterType));
+        if (isJson) { print(results); return; }
+        if (!results.length) { console.log('no endpoint matches "' + search + '"'); return; }
+        for (const ep of results) {
+          const badge = ep.readonly ? c.green("GET ") : (ep.type === "set" ? c.yellow("SET ") : c.red("ACT "));
+          console.log("  " + badge + ep.name.padEnd(34) + " " + c.grey(ep.category + " - " + ep.desc));
+        }
+        console.log("\n" + c.grey(results.length + " match" + (results.length === 1 ? "" : "es")));
+        return;
+      }
+
+      const cats = endpointsByCategory();
+
       if (isJson) {
         const out: Record<string, EndpointInfo[]> = {};
         for (const [name, eps] of Object.entries(cats)) {
-          out[name] = filterType
-            ? eps.filter(e => filterType === "get" ? e.type === "get" : e.type !== "get")
-            : eps;
+          if (!matchesCat(name)) continue;
+          const filtered = eps.filter(e => matchesType(e, filterType));
+          if (filtered.length) out[name] = filtered;
         }
         print(out);
         return;
       }
 
+      let shown = 0;
       for (const [catName, eps] of Object.entries(cats)) {
-        const filtered = filterType
-          ? eps.filter(e => filterType === "get" ? e.type === "get" : e.type !== "get")
-          : eps;
-        if (category && catName.toLowerCase() !== category.toLowerCase()) continue;
+        if (!matchesCat(catName)) continue;
+        const filtered = eps.filter(e => matchesType(e, filterType));
         if (!filtered.length) continue;
+        shown += filtered.length;
         console.log("\n" + c.bold(catName));
         for (const ep of filtered) {
           const badge = ep.readonly ? c.green("GET ") : (ep.type === "set" ? c.yellow("SET ") : c.red("ACT "));
           console.log("  " + badge + ep.name.padEnd(34) + " " + c.grey(ep.desc));
         }
       }
-      console.log("\n" + c.grey(ENDPOINT_COUNT + " endpoints | read=green write=yellow action=red"));
+      if (!shown) { fail('no endpoints match those filters'); process.exit(1); }
+      console.log("\n" + c.grey(shown + " of " + ENDPOINT_COUNT + " endpoints | read=green write=yellow action=red"));
       return;
     }
 

@@ -43,9 +43,18 @@ export function randomString(len: number): string {
 }
 
 /**
- * Obfuscate the username through a bitwise shuffle using the static
- * ENCRYPT_KEY.  Each input character produces two output characters by
- * splitting and swapping nibbles XOR'd against the key.
+ * Obfuscate the username, mirroring the router's `G()` helper.
+ *
+ * Each input character becomes two output characters.  Both carry the key
+ * character's HIGH nibble verbatim; their LOW nibble is the input's low
+ * (resp. high) nibble XOR'd with the key character's LOW nibble:
+ *
+ *   out[2a]   = (e & 0xF0) | ((i & 0x0F) ^ (e & 0x0F))
+ *   out[2a+1] = (e & 0xF0) | ((i >> 4)  ^ (e & 0x0F))
+ *
+ * Because ENCRYPT_KEY is ASCII, `e & 0xF0` is 0x30-0x70, so the output is
+ * always printable ASCII — "admin" encodes to "dc13ibej?7".  Verified against
+ * the router's own inverse function J() for every ASCII input.
  */
 export function obfuscateUsername(username: string): string {
   let out = "";
@@ -53,7 +62,7 @@ export function obfuscateUsername(username: string): string {
     const i = username.charCodeAt(a);
     const e = ENCRYPT_KEY.charCodeAt(a % ENCRYPT_KEY.length);
     out += String.fromCharCode((240 & e) | ((15 & i) ^ (15 & e)));
-    out += String.fromCharCode((15 & e) | ((240 & i) ^ (240 & e)));
+    out += String.fromCharCode((240 & e) | ((i >> 4) ^ (15 & e)));
   }
   return out;
 }

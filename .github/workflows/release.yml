@@ -4,15 +4,66 @@ on:
   push:
     tags: ["v*"]
 
+# Required for softprops/action-gh-release to upload assets.
+permissions:
+  contents: write
+
 jobs:
-  build:
-    runs-on: macos-latest
+  verify:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      - name: Build binary
-        run: bun build ./src/cli.ts --compile --outfile cpe-darwin-arm64
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+
+  build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: bun-darwin-arm64
+            asset: cpe-darwin-arm64
+            runner: macos-latest
+          - target: bun-darwin-x64
+            asset: cpe-darwin-x64
+            runner: macos-latest
+          - target: bun-linux-x64
+            asset: cpe-linux-x64
+            runner: ubuntu-latest
+          - target: bun-linux-arm64
+            asset: cpe-linux-arm64
+            runner: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Build ${{ matrix.asset }}
+        run: bun build ./src/cli.ts --compile --target=${{ matrix.target }} --outfile ${{ matrix.asset }}
+      - name: Smoke-test the binary
+        # Only the native binary can run on this runner.
+        if: matrix.target == 'bun-darwin-arm64' || matrix.target == 'bun-linux-x64'
+        run: ./${{ matrix.asset }} --version
+      - uses: actions/upload-artifact@v4
         with:
-          files: cpe-darwin-arm64
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Checksums
+        run: sha256sum cpe-* > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            cpe-*
+            SHA256SUMS
+          generate_release_notes: true
