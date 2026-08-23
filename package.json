@@ -1,6 +1,6 @@
 {
   "name": "cpe",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "A terminal control plane for TCL 5G CPE routers: authenticate through the encrypted JSON-RPC API, read every status endpoint, and act on the router from your shell or an agent.",
   "type": "module",
   "bin": {
