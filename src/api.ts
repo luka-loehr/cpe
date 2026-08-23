@@ -14,7 +14,12 @@ export interface Session {
   token: string | null;
 }
 
-export interface ApiResult {
+export interface ApiError extends Error {
+  code: string;
+  expired: boolean;
+}
+
+interface ApiResult {
   result?: unknown;
   error?: { code: string; message: string; [k: string]: unknown };
   jsonrpc: string;
@@ -27,11 +32,28 @@ function jsonrpcId(): string {
   return (100 * Math.random()).toFixed(1).toString();
 }
 
-/** Perform a raw JSON-RPC call with full encryption. */
-export async function call(session: Session, method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown> | null> {
+/** Throw a typed ApiError, marking session-expiry codes so callers can re-login. */
+function apiError(method: string, err: { code: string; message: string }): ApiError {
+  const e = new Error(`[${method}] ${err.code}: ${err.message}`) as ApiError;
+  e.code = err.code;
+  // -32607 = Session Expired, -32608 = Session Unestablish, 010002 = token invalid
+  e.expired = ["-32607", "-32608", "010002"].includes(err.code);
+  return e;
+}
+
+/**
+ * Perform an encrypted JSON-RPC call.
+ * Does NOT mutate the caller's `params` object.
+ */
+export async function call(
+  session: Session,
+  method: string,
+  params: Record<string, unknown> = {},
+): Promise<Record<string, unknown> | null> {
   const ts = Date.now();
-  params["_"] = ts;
-  const paramsStr = JSON.stringify(params);
+  // Copy params so we don't mutate the caller's object
+  const fullParams = { ...params, _: ts };
+  const paramsStr = JSON.stringify(fullParams);
   const hmac = computeHMAC(paramsStr, session.hmacKey);
   const encrypted = encrypt(paramsStr, session.tmpKey);
 
@@ -60,17 +82,11 @@ export async function call(session: Session, method: string, params: Record<stri
 
   const resp = (await res.json()) as ApiResult;
 
-  if (resp.error) {
-    throw new Error(`[${method}] ${resp.error.code}: ${resp.error.message}`);
-  }
+  if (resp.error) throw apiError(method, resp.error);
 
   if (resp.result && typeof resp.result === "string") {
-    try {
-      const decrypted = decrypt(resp.result, session.tmpKey);
-      return JSON.parse(decrypted) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
+    const decrypted = decrypt(resp.result, session.tmpKey);
+    return JSON.parse(decrypted) as Record<string, unknown>;
   }
 
   return (resp.result as Record<string, unknown>) ?? null;
@@ -131,9 +147,4 @@ export async function login(password: string): Promise<Session> {
   session.token = (loginResult as { token: string }).token;
 
   return session;
-}
-
-/** Restore a session from a saved token (no password needed). */
-export function restoreSession(sessionId: string, tmpKey: string, hmacKey: string, token: string): Session {
-  return { sessionId, tmpKey, hmacKey, token };
 }

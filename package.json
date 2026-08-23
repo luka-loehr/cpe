@@ -9,6 +9,5 @@
     "build": "bun build ./src/cli.ts --compile --outfile dist/cpe"
   },
   "keywords": ["tcl", "5g", "cpe", "router", "cli", "bun", "jsonrpc", "home-network", "automation"],
-  "license": "MIT",
-  "private": true
+  "license": "MIT"
 }

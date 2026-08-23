@@ -21,15 +21,11 @@ export function saveSession(session: Session): void {
 
 export function loadSession(): Session {
   if (!existsSync(SESSION_FILE)) {
-    throw new Error(`no session at ${SESSION_FILE} — run "cpe login"`);
+    throw new Error('no session at ' + SESSION_FILE + ' — run "cpe login"');
   }
   const s = JSON.parse(readFileSync(SESSION_FILE, "utf8")) as Session;
   if (!s.sessionId || !s.tmpKey || !s.hmacKey) {
-    throw new Error(`session is incomplete — run "cpe login"`);
+    throw new Error("session is incomplete — run " + '"cpe login"');
   }
   return s;
-}
-
-export function hasSession(): boolean {
-  return existsSync(SESSION_FILE);
 }
