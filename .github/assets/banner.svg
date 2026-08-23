@@ -1,0 +1,6 @@
+<svg width="1200" height="320" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="320" fill="#0a0a0a"/>
+  <text x="600" y="140" font-family="SF Mono, Monaco, Menlo, monospace" font-size="96" font-weight="bold" fill="#6366f1" text-anchor="middle">cpe</text>
+  <text x="600" y="195" font-family="SF Mono, Monaco, Menlo, monospace" font-size="24" fill="#888888" text-anchor="middle">your TCL 5G router, from a terminal</text>
+  <text x="600" y="250" font-family="SF Mono, Monaco, Menlo, monospace" font-size="16" fill="#555555" text-anchor="middle">327 endpoints · RSA key exchange · AES-256-CBC · PBKDF2-SHA512 · HMAC-SHA256</text>
+</svg>
