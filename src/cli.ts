@@ -12,7 +12,7 @@ import { saveSession, loadSession, clearSession, SESSION_FILE } from "./session.
 import { c, fail, step, ok, box, table, formatBytes, PLAN_UNITS } from "./ui.ts";
 import { ALL_ENDPOINTS, ENDPOINT_COUNT, getEndpoint, endpointsByCategory, searchEndpoints, type EndpointInfo } from "./endpoints.ts";
 
-const VERSION = "1.2.0";
+const VERSION = "1.2.1";
 const argv = process.argv.slice(2);
 const cmd = argv.find(a => !a.startsWith("-")) ?? "";
 const positional = () => argv.filter(a => !a.startsWith("-")).slice(1);
@@ -120,12 +120,28 @@ function guardWrite(endpoint: string): boolean {
   return true;
 }
 
-/** Wrap a call() to handle session expiry with a re-login hint. */
+/**
+ * Wrap a call() to handle session expiry with a re-login hint.
+ * Commands like `status` fan out over several endpoints in parallel, so the
+ * hint is emitted once per process rather than once per failed call.
+ */
+let expiryReported = false;
+
+/**
+ * Stop after a fan-out if the session turned out to be dead. Without this,
+ * commands that tolerate individual endpoint failures would render a table
+ * full of "?" on top of the expiry message.
+ */
+function bailIfExpired(): void {
+  if (expiryReported) process.exit(1);
+}
+
 async function safeCall(session: Session, method: string, params?: Record<string, unknown>) {
   try {
     return await call(session, method, params);
   } catch (e) {
-    if ((e as ApiError).expired) {
+    if ((e as ApiError).expired && !expiryReported) {
+      expiryReported = true;
       fail("session expired - run " + c.cyan("cpe login") + " again");
       step("the router auto-logs-out after a few minutes idle; see " + c.cyan("cpe call GetLogoutTimeSettings"));
     }
@@ -199,6 +215,7 @@ const main = async () => {
         safeCall(s, "GetConnectionState").catch(() => null),
         safeCall(s, "GetUsageSettings").catch(() => null),
       ]);
+      bailIfExpired();
       const signal = signalBars((modem as any)?.SignalStrength ?? 0);
       const uptime = (ap as any)?.DeviceUptime ?? 0;
       const summary = {
@@ -279,6 +296,7 @@ const main = async () => {
         safeCall(s, "GetApSystemInfo").catch(() => null),
         safeCall(s, "GetModemSystemInfo").catch(() => null),
       ]);
+      bailIfExpired();
       print({ system: sys, modem: modem });
       return;
     }
@@ -289,6 +307,7 @@ const main = async () => {
         safeCall(s, "GetConnectedDeviceList").catch(() => null),
         safeCall(s, "GetBlockDeviceList").catch(() => null),
       ]);
+      bailIfExpired();
       if (isJson) { print({ connected, blocked }); return; }
       const list = (connected as any)?.ConnectedList ?? [];
       if (!list.length) { console.log("no devices connected"); return; }
@@ -324,6 +343,7 @@ const main = async () => {
         safeCall(s, "GetWlanSettings").catch(() => null),
         safeCall(s, "GetWlanState").catch(() => null),
       ]);
+      bailIfExpired();
       print({ status, settings, state });
       return;
     }
@@ -344,6 +364,7 @@ const main = async () => {
         safeCall(s, "GetSMSContactList", { Page: 0 }).catch(() => null),
         safeCall(s, "GetSMSStorageState").catch(() => null),
       ]);
+      bailIfExpired();
       let messages: any[] = (contacts as any)?.SMSContactList ?? [];
       // Unread is tracked per contact thread as UnreadCount, not a boolean.
       if (has("--unread")) messages = messages.filter((m: any) => (m.UnreadCount ?? 0) > 0);
@@ -368,6 +389,7 @@ const main = async () => {
         safeCall(s, "GetUsageRecord").catch(() => null),
         safeCall(s, "GetUsageSettings").catch(() => null),
       ]);
+      bailIfExpired();
       print({ active, record, settings });
       return;
     }
@@ -381,6 +403,7 @@ const main = async () => {
         safeCall(s, "GetNetworkSettings").catch(() => null),
         safeCall(s, "GetConnectionState").catch(() => null),
       ]);
+      bailIfExpired();
       print({ info, signal, registration: regState, settings, connection: connState });
       return;
     }
@@ -392,6 +415,7 @@ const main = async () => {
         safeCall(s, "GetVpnSettings").catch(() => null),
         safeCall(s, "GetVPNPassthrough").catch(() => null),
       ]);
+      bailIfExpired();
       print({ info, settings, passthrough });
       return;
     }
@@ -407,6 +431,7 @@ const main = async () => {
         safeCall(s, "GetALGSettings").catch(() => null),
         safeCall(s, "GetAntiDoSattack").catch(() => null),
       ]);
+      bailIfExpired();
       print({ level, status, mac_filter: macFilter, port_triggering: portTrig, upnp, alg, anti_dos: dos });
       return;
     }
@@ -417,6 +442,7 @@ const main = async () => {
         safeCall(s, "GetSimStatus").catch(() => null),
         safeCall(s, "GetAutoValidatePinState").catch(() => null),
       ]);
+      bailIfExpired();
       print({ sim: status, auto_pin: pinState });
       return;
     }
