@@ -423,9 +423,33 @@ export const CATALOG: Record<string, EndpointInfo> = {
   "SetAutoUpdateFlag": { name: "SetAutoUpdateFlag", category: "Firmware Update", type: "set", desc: "Configure auto-update", readonly: false },
   "GetFOTABatteryState": { name: "GetFOTABatteryState", category: "Firmware Update", type: "get", desc: "FOTA battery state", readonly: true },
 
+
+  // Lower-case methods the web UI calls directly (filters, port forwarding,
+  // profiles, SMS internals). Extracted from the router bundle's post() sites.
+  "getIPFilterList": { name: "getIPFilterList", category: "Firewall/Security", type: "get", desc: "List IP filter rules", readonly: true },
+  "addIPFilter": { name: "addIPFilter", category: "Firewall/Security", type: "set", desc: "Add an IP filter rule", readonly: false },
+  "editIPFilter": { name: "editIPFilter", category: "Firewall/Security", type: "set", desc: "Edit an IP filter rule", readonly: false },
+  "deleteIPFilter": { name: "deleteIPFilter", category: "Firewall/Security", type: "set", desc: "Delete an IP filter rule", readonly: false },
+  "getUrlFilterSettings": { name: "getUrlFilterSettings", category: "Firewall/Security", type: "get", desc: "URL filter / parental control rules", readonly: true },
+  "getFirewallSwitch": { name: "getFirewallSwitch", category: "Firewall/Security", type: "get", desc: "Firewall master switch state", readonly: true },
+  "setFirewallSwitch": { name: "setFirewallSwitch", category: "Firewall/Security", type: "set", desc: "Toggle the firewall master switch", readonly: false },
+  "getDMZInfo": { name: "getDMZInfo", category: "Firewall/Security", type: "get", desc: "DMZ host configuration", readonly: true },
+  "setDMZInfo": { name: "setDMZInfo", category: "Firewall/Security", type: "set", desc: "Configure the DMZ host", readonly: false },
+  "getPortFwding": { name: "getPortFwding", category: "PortForwarding", type: "get", desc: "List port forwarding rules", readonly: true },
+  "addPortFwding": { name: "addPortFwding", category: "PortForwarding", type: "set", desc: "Add a port forwarding rule", readonly: false },
+  "editPortFwding": { name: "editPortFwding", category: "PortForwarding", type: "set", desc: "Edit a port forwarding rule", readonly: false },
+  "deletePortFwding": { name: "deletePortFwding", category: "PortForwarding", type: "set", desc: "Delete a port forwarding rule", readonly: false },
+  "getCurrentProfile": { name: "getCurrentProfile", category: "Profiles", type: "get", desc: "Currently active APN profile", readonly: true },
+  "setCurrentProfile": { name: "setCurrentProfile", category: "Profiles", type: "set", desc: "Switch the active APN profile", readonly: false },
+  "getSmsInitState": { name: "getSmsInitState", category: "SMS", type: "get", desc: "SMS subsystem initialisation state", readonly: true },
+  "getSMSStateByLocation": { name: "getSMSStateByLocation", category: "SMS", type: "get", desc: "SMS state for a storage location", readonly: true },
+  "getSMSAutoRedirectSetting": { name: "getSMSAutoRedirectSetting", category: "SMS", type: "get", desc: "SMS auto-redirect settings", readonly: true },
+  "setSMSAutoRedirectSetting": { name: "setSMSAutoRedirectSetting", category: "SMS", type: "set", desc: "Configure SMS auto-redirect", readonly: false },
+  "getTotalConnection": { name: "getTotalConnection", category: "Devices", type: "get", desc: "Total active connection count", readonly: true },
+  "uploadBackupSettings": { name: "uploadBackupSettings", category: "Device Actions", type: "action", desc: "Upload and restore a settings backup", readonly: false },
 };
 
-export const ALL_ENDPOINTS = Object.keys(CATALOG) as const;
+export const ALL_ENDPOINTS: readonly string[] = Object.keys(CATALOG);
 export const ENDPOINT_COUNT = ALL_ENDPOINTS.length;
 
 export function getEndpoint(name: string): EndpointInfo | undefined {
