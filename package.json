@@ -1,0 +1,14 @@
+{
+  "name": "cpe",
+  "version": "1.0.0",
+  "description": "A terminal control plane for TCL 5G CPE routers: authenticate through the encrypted JSON-RPC API, read every status endpoint, and act on the router from your shell or an agent.",
+  "type": "module",
+  "bin": { "cpe": "./src/cli.ts" },
+  "scripts": {
+    "start": "bun run src/cli.ts",
+    "build": "bun build ./src/cli.ts --compile --outfile dist/cpe"
+  },
+  "keywords": ["tcl", "5g", "cpe", "router", "cli", "bun", "jsonrpc", "home-network", "automation"],
+  "license": "MIT",
+  "private": true
+}
