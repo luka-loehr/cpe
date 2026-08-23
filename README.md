@@ -18,8 +18,8 @@ session is stored at `~/.cpe/session.json` with `0600` permissions.
 ```
 $CPE_PASSWORD ──► key exchange (RSA) ──► session ──► token
                         │
-                        ├──► Get*  (327 endpoints, read-only)
-                        └──► Set*  (actions, explicit only)
+                        ├──► Get*  (164 read-only endpoints)
+                        └──► Set*  (135 write + 28 action endpoints, --confirm required)
 ```
 
 > **Why the crypto is non-trivial.** The router does not accept a plain
@@ -27,6 +27,17 @@ $CPE_PASSWORD ──► key exchange (RSA) ──► session ──► token
 > a session, PBKDF2-SHA512 password hashing against a per-session salt,
 > AES-256-CBC encryption of every request body (OpenSSL `Salted__` format),
 > and HMAC-SHA256 signing of every payload. `cpe` implements all of it.
+
+## Tested on
+
+| Router | Model | Firmware | Status |
+|--------|-------|----------|--------|
+| TCL 5G CPE | HH515L (EM variant) | `HH515L_EM_02.01_15` | Tested, working |
+
+The API was extracted from the HH515L web UI bundle (`app.9a52d57c.js`).
+Other TCL 5G CPE models sharing the same web UI framework (project `HH515L`,
+custom `EM`) likely work but are untested. If your router uses a different
+firmware, the endpoint list or auth flow may differ.
 
 ## Install
 
@@ -52,33 +63,37 @@ cpe login      # authenticate, session saved to ~/.cpe/session.json
 cpe status     # router, network, signal, wifi at a glance
 ```
 
-`login` reads the password from `$CPE_PASSWORD` — it is never passed on the
-command line (where it would show in `ps`), never logged, and never written
-to disk. Only the resulting session token is stored.
+`login` reads the password from `$CPE_PASSWORD` if set, or prompts
+interactively with hidden input. The password is never passed on the command
+line (where it would show in `ps`), never logged, and never written to disk.
+Only the resulting session token is stored.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `cpe login` | Authenticate (reads `$CPE_PASSWORD`). |
+| `cpe login` | Authenticate (interactive prompt or `$CPE_PASSWORD`). |
 | `cpe status` | Router, network, signal, and wifi summary. |
-| `cpe info` | Full system info (firmware, hardware, MAC). |
+| `cpe info` | Hardware + firmware info. |
 | `cpe devices` | List all connected devices. |
 | `cpe wifi` | Wifi settings and connected client counts. |
-| `cpe sms` | List SMS messages. |
-| `cpe sms send <number> <message>` | Send an SMS. |
+| `cpe wifi on` / `off` | Toggle wifi (requires `--confirm`). |
+| `cpe sms` | List SMS messages (`--unread` for unread only). |
+| `cpe sms send <number> <message>` | Send an SMS (requires `--confirm`). |
 | `cpe usage` | Data usage stats and billing cycle. |
 | `cpe network` | Network registration and signal list. |
 | `cpe vpn` | VPN settings and connection status. |
-| `cpe firewall` | Firewall status, MAC/IP filters, port forwarding. |
-| `cpe reboot` | Reboot the router. |
-| `cpe reset` | Factory reset (dangerous). |
-| `cpe wifi on` / `off` | Toggle wifi. |
-| `cpe block <mac>` / `unblock <mac>` | Block or unblock a device. |
+| `cpe firewall` | Firewall status, MAC filters, port triggering. |
+| `cpe sim` | SIM status and PIN state. |
+| `cpe reboot` | Reboot the router (requires `--confirm`). |
+| `cpe reset` | Factory reset (requires `--confirm`, dangerous). |
+| `cpe block <mac>` / `unblock <mac>` | Block or unblock a device (requires `--confirm`). |
+| `cpe connect` / `disconnect` | Data connection on/off (requires `--confirm`). |
 | `cpe call <endpoint> [json]` | Call any of the 327 API endpoints directly. |
-| `cpe endpoints` [--get\|--set] | List all available API endpoints. |
+| `cpe endpoints` | Browse + search the endpoint catalog. |
 
-Useful flags: `--json` (raw JSON output), `--get` / `--set` (filter endpoints).
+Useful flags: `--json` (compact JSON for agents), `--confirm` (required for
+writes), `--get` / `--set` (filter endpoints), `--search <query>`, `--category <cat>`.
 
 ## The raw API
 
@@ -91,9 +106,13 @@ cpe call GetUsageSettings
 cpe call GetVpnSettings
 ```
 
-`cpe endpoints` lists all 327. `--get` filters to read-only `Get*` endpoints,
-`--set` to write `Set*` endpoints. See [src/endpoints.ts](src/endpoints.ts)
-for the full list, extracted from the router's own web UI bundle.
+`cpe endpoints` lists all 327, organized by category with descriptions and
+read/write/action badges. `--get` filters to read-only, `--set` to
+write/action. `--search` finds endpoints by name or description. The full
+catalog with machine-readable metadata is in [src/endpoints.ts](src/endpoints.ts).
+
+All `Set*` and action endpoints require `--confirm` — this guard prevents
+accidental configuration changes, whether from a typo or an autonomous agent.
 
 ## How authentication works
 
@@ -107,7 +126,8 @@ The TCL HH515L web UI uses `loginAuthType: 7` — a four-stage handshake:
 2. **Parameter encryption.** Every subsequent request has its JSON-RPC
    `params` JSON-stringified, then AES-256-CBC encrypted using a key derived
    from `TmpKey` via PBKDF2-SHA256 (50 iterations, 48-byte output: 32-byte
-   key + 16-byte IV), in OpenSSL `Salted__` format.
+   key + 16-byte IV), in OpenSSL `Salted__` format. Node's
+   `createCipheriv` handles PKCS7 padding automatically.
 
 3. **HMAC signing.** The plaintext params JSON is also HMAC-SHA256 signed
    with `HmacKey`, and the digest is sent alongside the encrypted payload.
@@ -126,18 +146,30 @@ src/
   cli.ts            argument parsing and dispatch
   api.ts            the JSON-RPC client, full auth flow
   crypto.ts         RSA, AES-256-CBC, PBKDF2, HMAC, username obfuscation
-  endpoints.ts      all 327 API endpoints extracted from the router
-  session.ts        session persistence (~/.cpe/session.json)
+  endpoints.ts       all 327 API endpoints with descriptions and categories
+  session.ts         session persistence (~/.cpe/session.json)
   ui.ts             terminal output helpers
 ```
 
 Session data lives in `~/.cpe/session.json`.
 
-## Scope
+## Disclaimer
 
-This drives your own router, on your own network, from your own machine.
-The TCL web UI API is not a documented interface and can change between
-firmware versions; when it does, things here will break.
+**This is an unofficial, community-developed tool.** It is not affiliated
+with, endorsed by, or supported by TCL Corporation or any of its
+subsidiaries. The author of this tool assumes no liability for any damage,
+data loss, or device bricking that may result from its use.
+
+This tool was developed by reverse-engineering the web UI of a router the
+developer owns, for personal automation purposes. It communicates only with
+the router on your local network using the same API the web UI uses. It does
+not bypass authentication, exploit vulnerabilities, or access any service
+without proper credentials.
+
+By using this tool, you accept full responsibility for any consequences. If
+your router locks you out, resets, or breaks, that is on you. Always have the
+router's admin password and a backup of your configuration before using
+`cpe reset` or any `Set*` endpoint.
 
 ## License
 
