@@ -1,0 +1,5 @@
+# False positives: ENCRYPT_KEY is the static username-obfuscation key that every
+# TCL HH515L ships in its web UI JavaScript. It is public and not a credential.
+# Newer commits carry an inline gitleaks:allow; these are the historical hits.
+00b8e26b92d6d3156afff2303d9adea9dc2e895c:src/crypto.ts:generic-api-key:27
+de6a45ef92bb62d25bc092a454931b5213a50949:test/crypto.test.ts:generic-api-key:14
