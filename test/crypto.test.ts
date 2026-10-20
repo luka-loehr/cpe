@@ -11,7 +11,7 @@ import {
   obfuscateUsername, hashPassword, encrypt, decrypt, computeHMAC, randomString,
 } from "../src/crypto.ts";
 
-const ENCRYPT_KEY = "e5dl12XYVggihggafXWf0f2YSf2Xngd1";
+const ENCRYPT_KEY = "e5dl12XYVggihggafXWf0f2YSf2Xngd1"; // gitleaks:allow (public static key from the router web UI, not a secret)
 
 /** Verbatim port of the router's inverse function J(). */
 function routerDecode(t: string): string {

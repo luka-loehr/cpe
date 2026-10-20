@@ -31,7 +31,7 @@ import {
   createPublicKey,
 } from "node:crypto";
 
-const ENCRYPT_KEY = "e5dl12XYVggihggafXWf0f2YSf2Xngd1";
+const ENCRYPT_KEY = "e5dl12XYVggihggafXWf0f2YSf2Xngd1"; // gitleaks:allow (public static key from the router web UI, not a secret)
 const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
 /** Generate a random alphanumeric string of `len` characters. */
